@@ -162,6 +162,15 @@ def ensure_bootstrap(app):
         try:
             if auto_init:
                 db.create_all()
+                from .migrations import ensure_schema
+
+                # 老库升级新增"数据质量"列后, 自动回扫一次历史数据完成标记。
+                if ensure_schema():
+                    app.logger.info("data-quality columns added, scanning history ...")
+                    from .services import quality_service
+
+                    result = quality_service.scan_invalid_measurements()
+                    app.logger.info("flagged %d invalid measurement(s)", result["flagged"])
             if auto_seed and db.session.query(Station.id).first() is None:
                 app.logger.info("seeding demo data ...")
                 seed_demo_data()

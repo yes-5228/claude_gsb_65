@@ -21,6 +21,7 @@ const INITIAL_FILTERS = {
   pollutant: '',
   period: '',
   is_exceeded: '',
+  quality: 'all',
   exceedance_status: '',
   data_source: '',
   date_from: '',
@@ -72,15 +73,26 @@ export default function QueryPage() {
 
       {query.error ? <Alert tone="error">{query.error.message}</Alert> : null}
 
+      {summary?.invalid_count > 0 ? (
+        <Alert tone="warning">
+          当前范围有 {summary.invalid_count} 条异常数据(负值 / 超量程极大值), 未计入下方达标率、平均浓度与统计排名;
+          达标率按 {summary.valid_count} 条有效数据计算。
+        </Alert>
+      ) : null}
+
       <div className="stat-grid">
-        <StatCard label="符合条件的数据量" value={summary ? summary.total : '-'} foot={summary ? `涉及 ${summary.station_count} 个监测点` : ''} />
         <StatCard
-          label="超标记录"
-          value={summary ? summary.exceeded_count : '-'}
-          tone={summary?.exceeded_count ? 'danger' : undefined}
-          foot={summary ? `超标率 ${formatPercent(summary.exceed_rate)}` : ''}
+          label="有效数据量"
+          value={summary ? summary.valid_count : '-'}
+          foot={summary ? `共 ${summary.total} 条, 异常 ${summary.invalid_count} 条 / ${summary.station_count} 个监测点` : ''}
         />
-        <StatCard label="平均浓度" value={summary ? formatNumber(summary.avg_value) : '-'} foot="按当前筛选范围计算" />
+        <StatCard
+          label="达标率(有效口径)"
+          value={summary ? formatPercent(summary.compliance_rate) : '-'}
+          tone={summary?.compliance_rate < 0.9 ? 'danger' : undefined}
+          foot={summary ? `有效数据中 ${summary.valid_exceeded_count} 条超标` : ''}
+        />
+        <StatCard label="平均浓度(有效)" value={summary ? formatNumber(summary.avg_value) : '-'} foot="异常值不参与平均" />
         <StatCard
           label="时间范围"
           value={summary ? formatDateTime(summary.first_measured_at).slice(5, 10) : '-'}

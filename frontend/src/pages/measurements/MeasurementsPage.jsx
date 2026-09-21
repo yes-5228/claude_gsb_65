@@ -1,9 +1,11 @@
 import { useCallback, useState } from 'react'
 import { downloadFile } from '../../api/client.js'
 import {
+  correctMeasurement,
   deleteMeasurement,
   exportMeasurementsUrl,
-  listMeasurements
+  listMeasurements,
+  runQualityScan
 } from '../../api/measurements.js'
 import ConfirmDialog from '../../components/common/ConfirmDialog.jsx'
 import Pagination from '../../components/common/Pagination.jsx'
@@ -12,6 +14,7 @@ import { Alert } from '../../components/common/Feedback.jsx'
 import { useToast } from '../../components/common/ToastProvider.jsx'
 import { useListQuery } from '../../hooks/useListQuery.js'
 import { saveBlob } from '../../utils/download.js'
+import BatchImportPanel from './components/BatchImportPanel.jsx'
 import EntryForm from './components/EntryForm.jsx'
 import EntryResultPanel from './components/EntryResultPanel.jsx'
 import MeasurementFilters from './components/MeasurementFilters.jsx'
@@ -22,6 +25,7 @@ const INITIAL_FILTERS = {
   pollutant: '',
   period: '',
   is_exceeded: '',
+  quality: 'all',
   date_from: '',
   date_to: ''
 }
@@ -33,6 +37,7 @@ export default function MeasurementsPage() {
   const [pendingDelete, setPendingDelete] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [scanning, setScanning] = useState(false)
 
   const handleSubmitted = useCallback(
     (payload) => {
@@ -41,6 +46,28 @@ export default function MeasurementsPage() {
     },
     [query]
   )
+
+  const handleCorrect = useCallback(
+    async (row, payload) => {
+      await correctMeasurement(row.id, payload)
+      toast.success('修正成功, 超标判定与达标统计已按同一口径重新计算')
+      query.reload()
+    },
+    [query, toast]
+  )
+
+  const handleScan = useCallback(async () => {
+    setScanning(true)
+    try {
+      const result = await runQualityScan({})
+      toast.success(`历史数据扫描完成: 新标记异常 ${result.flagged} 条`)
+      query.reload()
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setScanning(false)
+    }
+  }, [query, toast])
 
   const handleDelete = useCallback(async () => {
     if (!pendingDelete) return
@@ -80,12 +107,22 @@ export default function MeasurementsPage() {
         <EntryResultPanel result={result} summary={query.summary} onClose={() => setResult(null)} />
       </div>
 
+      <BatchImportPanel onImported={handleSubmitted} />
+
       <MeasurementFilters
         value={query.filters}
         loading={query.loading}
         onSubmit={(next) => query.setFilters(next)}
         onReset={() => query.setFilters(INITIAL_FILTERS)}
       />
+
+      {query.summary?.invalid_count > 0 ? (
+        <Alert tone="warning">
+          当前筛选范围有 <strong>{query.summary.invalid_count}</strong> 条异常数据(负值或超量程极大值),
+          未计入达标率、均值与站点排名; 达标率按 {query.summary.valid_count} 条有效数据计算。
+          可在下方列表中“修正”或删除, 修正后统计自动按同一口径重算。
+        </Alert>
+      ) : null}
 
       {query.error ? <Alert tone="error">{query.error.message}</Alert> : null}
 
@@ -94,6 +131,9 @@ export default function MeasurementsPage() {
         hint="按监测时间倒序展示, 便于核对刚提交的记录"
         actions={
           <>
+            <button type="button" className="btn btn-sm" onClick={handleScan} disabled={scanning}>
+              {scanning ? '扫描中...' : '扫描历史异常'}
+            </button>
             <button type="button" className="btn btn-sm" onClick={query.reload} disabled={query.loading}>
               刷新
             </button>
@@ -107,6 +147,7 @@ export default function MeasurementsPage() {
           rows={query.items}
           loading={query.loading}
           onDelete={(row) => setPendingDelete(row)}
+          onCorrect={handleCorrect}
         />
         <Pagination
           page={query.page}

@@ -9,7 +9,10 @@ def register_commands(app):
     @app.cli.command("init-db")
     def init_db():
         """Create database tables."""
+        from .migrations import ensure_schema
+
         db.create_all()
+        ensure_schema()
         click.echo("数据库表已创建")
 
     @app.cli.command("seed")
@@ -51,4 +54,18 @@ def register_commands(app):
                 Measurement.query.count(),
                 Exceedance.query.count(),
             )
+        )
+
+    @app.cli.command("quality-scan")
+    @click.option("--rescan-all", is_flag=True, help="连同已标记的记录一起重新判定")
+    def quality_scan(rescan_all):
+        """Scan history for implausible values (negative / out of range) and flag them."""
+        from .migrations import ensure_schema
+        from .services import quality_service
+
+        ensure_schema()
+        result = quality_service.scan_invalid_measurements(rescan_all=rescan_all)
+        click.echo(
+            "质量扫描完成: 扫描 %(scanned)d 条, 新标记异常 %(flagged)d 条, "
+            "此前已标记 %(already_flagged)d 条, 恢复有效 %(restored)d 条" % result
         )

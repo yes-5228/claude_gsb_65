@@ -47,6 +47,15 @@ export default function OverviewPage() {
 
   return (
     <>
+      {measurements.invalid_count > 0 ? (
+        <Alert tone="warning">
+          检测到 <strong>{measurements.invalid_count}</strong> 条历史异常数据(负值或超量程极大值),
+          已从达标率与站点排名中剔除, 请前往
+          <Link to="/measurements"> 监测数据录入 </Link>
+          页修正; 修正后各项统计会按同一口径自动重算。超标工作台另有 {exceedances.invalid_count} 条异常关联单不计入统计。
+        </Alert>
+      ) : null}
+
       <div className="stat-grid">
         <StatCard
           label="监测点总数"
@@ -56,15 +65,20 @@ export default function OverviewPage() {
             .join(' · ')}
         />
         <StatCard
-          label="监测数据总量"
-          value={measurements.total}
-          foot={`覆盖 ${measurements.station_count} 个监测点 · 均值 ${formatNumber(measurements.avg_value)}`}
+          label="有效监测数据"
+          value={measurements.valid_count}
+          tone={measurements.invalid_count > 0 ? 'warning' : undefined}
+          foot={
+            measurements.invalid_count > 0
+              ? `共 ${measurements.total} 条, 其中异常 ${measurements.invalid_count} 条已剔除`
+              : `覆盖 ${measurements.station_count} 个监测点 · 均值 ${formatNumber(measurements.avg_value)}`
+          }
         />
         <StatCard
-          label="超标记录"
-          value={exceedances.total}
-          tone={exceedances.total ? 'danger' : undefined}
-          foot={`超标率 ${formatPercent(measurements.exceed_rate)} · 最大 ${formatRatio(exceedances.max_ratio)}`}
+          label="达标率(有效口径)"
+          value={formatPercent(measurements.compliance_rate)}
+          tone={measurements.compliance_rate < 0.9 ? 'danger' : undefined}
+          foot={`${measurements.valid_exceeded_count} 条超标 · 最大超标倍数 ${formatRatio(exceedances.max_ratio)}`}
         />
         <StatCard
           label="待标注超标"

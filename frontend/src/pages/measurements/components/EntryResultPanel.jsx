@@ -41,13 +41,20 @@ export default function EntryResultPanel({ result, summary, onClose }) {
           <div className="stack">
             <div className="stat-grid">
               <div className="stat-card">
-                <div className="stat-label">当前筛选记录数</div>
-                <div className="stat-value">{summary.total}</div>
+                <div className="stat-label">有效记录数</div>
+                <div className="stat-value">{summary.valid_count ?? summary.total}</div>
+                {(summary.invalid_count ?? 0) > 0 ? (
+                  <div className="stat-foot" style={{ color: 'var(--warning)' }}>
+                    另有 {summary.invalid_count} 条异常未计入
+                  </div>
+                ) : null}
               </div>
               <div className="stat-card">
                 <div className="stat-label">其中超标</div>
-                <div className="stat-value danger-text">{summary.exceeded_count}</div>
-                <div className="stat-foot">超标率 {formatPercent(summary.exceed_rate)}</div>
+                <div className="stat-value danger-text">{summary.valid_exceeded_count ?? summary.exceeded_count}</div>
+                <div className="stat-foot">
+                  达标率 {formatPercent(summary.compliance_rate ?? 1 - (summary.exceed_rate || 0))}
+                </div>
               </div>
               <div className="stat-card">
                 <div className="stat-label">涉及监测点</div>
@@ -59,7 +66,7 @@ export default function EntryResultPanel({ result, summary, onClose }) {
               <dd>{formatDateTime(summary.first_measured_at)}</dd>
               <dt>最近监测时间</dt>
               <dd>{formatDateTime(summary.last_measured_at)}</dd>
-              <dt>均值</dt>
+              <dt>有效数据均值</dt>
               <dd>{formatNumber(summary.avg_value)}</dd>
             </dl>
           </div>

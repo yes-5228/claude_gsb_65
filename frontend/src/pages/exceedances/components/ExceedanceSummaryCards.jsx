@@ -20,7 +20,15 @@ export default function ExceedanceSummaryCards({ summary }) {
 
   return (
     <div className="stat-grid">
-      <StatCard label="筛选范围内超标记录" value={summary.total} foot={`最大超标倍数 ${formatRatio(summary.max_ratio)}`} />
+      <StatCard
+        label="筛选范围内超标记录"
+        value={summary.total}
+        foot={
+          summary.invalid_count > 0
+            ? `最大超标倍数 ${formatRatio(summary.max_ratio)} · 另有 ${summary.invalid_count} 条异常数据关联单已剔除`
+            : `最大超标倍数 ${formatRatio(summary.max_ratio)}`
+        }
+      />
       <StatCard
         label="待标注"
         value={summary.pending}

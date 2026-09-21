@@ -29,7 +29,7 @@ export default function StatisticsPanel({ params, onChange, data, loading, error
   return (
     <SectionCard
       title="聚合统计"
-      hint="统计基于上方筛选条件, 可与结果表交叉验证"
+      hint="统计值、达标率与排名只采用有效数据; 异常数据(负值/超量程)单列展示, 不计入分母"
       actions={
         <>
           <div style={{ width: 160 }}>
@@ -60,16 +60,23 @@ export default function StatisticsPanel({ params, onChange, data, loading, error
         ) : null}
         {items.length > 0 ? (
           <>
+            {data?.totals?.invalid_count > 0 ? (
+              <Alert tone="warning">
+                当前范围内有 {data.totals.invalid_count} 条异常数据未参与统计与排名,
+                可在“监测数据录入”页筛选异常数据后修正, 修正后达标率与排名自动按同一口径重算。
+              </Alert>
+            ) : null}
             <BarChart items={items} danger />
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
                     <th>分组</th>
-                    <th className="text-right">{isCount ? '数据条数' : '统计值'}</th>
-                    <th className="text-right">数据量</th>
+                    <th className="text-right">{isCount ? '有效数据条数' : '统计值(有效)'}</th>
+                    <th className="text-right">异常数</th>
                     <th className="text-right">超标数</th>
                     <th className="text-right">超标率</th>
+                    <th className="text-right">达标率</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -77,9 +84,12 @@ export default function StatisticsPanel({ params, onChange, data, loading, error
                     <tr key={item.key}>
                       <td>{item.label}</td>
                       <td className="text-right strong">{formatNumber(item.value)}</td>
-                      <td className="text-right">{item.count}</td>
+                      <td className="text-right" style={{ color: item.invalid_count ? 'var(--warning)' : undefined }}>
+                        {item.invalid_count || 0}
+                      </td>
                       <td className="text-right danger-text">{item.exceeded_count}</td>
                       <td className="text-right">{formatPercent(item.exceed_rate)}</td>
+                      <td className="text-right success-text">{formatPercent(item.compliance_rate)}</td>
                     </tr>
                   ))}
                 </tbody>

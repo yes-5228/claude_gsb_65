@@ -6,7 +6,9 @@ import { Alert, Loading } from '../../../components/common/Feedback.jsx'
 import Tag from '../../../components/common/Tag.jsx'
 import { useToast } from '../../../components/common/ToastProvider.jsx'
 import { usePollutantMeta, useStationOptions } from '../../../hooks/useOptions.js'
+import { useValuePolicy } from '../../../hooks/useValuePolicy.js'
 import { formatNumber, toDateTimeInput } from '../../../utils/format.js'
+import { maxFor, validateReading } from '../../../utils/validation.js'
 
 const PERIODS = [
   { value: 'hourly', label: '小时均值' },
@@ -23,6 +25,7 @@ export default function EntryForm({ onPreview, onSubmitted }) {
   const toast = useToast()
   const { data: stationData, loading: stationLoading, error: stationError } = useStationOptions()
   const { data: pollutantData, loading: pollutantLoading } = usePollutantMeta()
+  const { policy } = useValuePolicy()
 
   const [form, setForm] = useState({
     station_id: '',
@@ -86,10 +89,8 @@ export default function EntryForm({ onPreview, onSubmitted }) {
     if (!form.measured_at) next.measured_at = '请选择监测时间'
     if (filled.length === 0) next.entries = '至少填写一个因子的监测值'
     filled.forEach(([pollutant, raw]) => {
-      const number = Number(raw)
-      if (Number.isNaN(number)) next[pollutant] = '监测值必须是数字'
-      else if (number < 0) next[pollutant] = '监测值不能为负数'
-      else if (number > 10000) next[pollutant] = '监测值超出合理范围, 请检查是否录错'
+      const message = validateReading(raw, pollutant, policy)
+      if (message) next[pollutant] = message
     })
     setErrors(next)
     if (Object.keys(next).length) {
@@ -235,7 +236,8 @@ export default function EntryForm({ onPreview, onSubmitted }) {
                       <Input
                         type="number"
                         step="0.01"
-                        min="0"
+                        min={policy.min_value}
+                        max={maxFor(policy, pollutant.code)}
                         value={values[pollutant.code] ?? ''}
                         onChange={setValue(pollutant.code)}
                         invalid={Boolean(errors[pollutant.code])}

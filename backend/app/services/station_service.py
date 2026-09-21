@@ -85,35 +85,52 @@ def stats_map(station_ids):
         return {}
     measurements = dict(
         db.session.query(Measurement.station_id, func.count(Measurement.id))
-        .filter(Measurement.station_id.in_(station_ids))
+        .filter(Measurement.station_id.in_(station_ids), Measurement.is_valid.is_(True))
         .group_by(Measurement.station_id)
         .all()
     )
     exceeded = dict(
         db.session.query(Measurement.station_id, func.count(Measurement.id))
-        .filter(Measurement.station_id.in_(station_ids), Measurement.is_exceeded.is_(True))
+        .filter(
+            Measurement.station_id.in_(station_ids),
+            Measurement.is_valid.is_(True),
+            Measurement.is_exceeded.is_(True),
+        )
         .group_by(Measurement.station_id)
         .all()
     )
     pending = dict(
         db.session.query(Exceedance.station_id, func.count(Exceedance.id))
-        .filter(Exceedance.station_id.in_(station_ids), Exceedance.status == "pending")
+        .join(Measurement, Exceedance.measurement_id == Measurement.id)
+        .filter(
+            Exceedance.station_id.in_(station_ids),
+            Exceedance.status == "pending",
+            Measurement.is_valid.is_(True),
+        )
         .group_by(Exceedance.station_id)
         .all()
     )
     last_seen = dict(
         db.session.query(Measurement.station_id, func.max(Measurement.measured_at))
-        .filter(Measurement.station_id.in_(station_ids))
+        .filter(Measurement.station_id.in_(station_ids), Measurement.is_valid.is_(True))
         .group_by(Measurement.station_id)
         .all()
     )
     from ..models.base import iso
+
+    invalid = dict(
+        db.session.query(Measurement.station_id, func.count(Measurement.id))
+        .filter(Measurement.station_id.in_(station_ids), Measurement.is_valid.is_(False))
+        .group_by(Measurement.station_id)
+        .all()
+    )
 
     return {
         station_id: {
             "measurement_count": int(measurements.get(station_id, 0)),
             "exceeded_count": int(exceeded.get(station_id, 0)),
             "pending_count": int(pending.get(station_id, 0)),
+            "invalid_count": int(invalid.get(station_id, 0)),
             "last_measured_at": iso(last_seen.get(station_id)),
         }
         for station_id in station_ids
@@ -130,7 +147,7 @@ def detail_stats(station):
             func.avg(Measurement.value),
             func.max(Measurement.value),
         )
-        .filter(Measurement.station_id == station.id)
+        .filter(Measurement.station_id == station.id, Measurement.is_valid.is_(True))
         .group_by(Measurement.pollutant)
         .all()
     )

@@ -33,7 +33,16 @@ export default function StationTable({ rows, loading, onDetail, onEdit, onDelete
       key: 'stats',
       title: '数据量',
       align: 'right',
-      render: (row) => formatNumber(row.stats?.measurement_count ?? 0, 0)
+      render: (row) => (
+        <span>
+          {formatNumber(row.stats?.measurement_count ?? 0, 0)}
+          {row.stats?.invalid_count ? (
+            <span className="small" style={{ color: 'var(--warning)' }} title="异常数据不计入统计与排名">
+              {' '}(异常 {row.stats.invalid_count})
+            </span>
+          ) : null}
+        </span>
+      )
     },
     {
       key: 'exceeded',

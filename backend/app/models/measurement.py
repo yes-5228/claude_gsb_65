@@ -25,6 +25,11 @@ class Measurement(TimestampMixin, db.Model):
     limit_value = db.Column(db.Float)
     exceed_ratio = db.Column(db.Float)
     is_exceeded = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    # 数据质量: is_valid=False 表示该值未通过服务端合理性闸门 (负值 / 超量程极大值等),
+    # 多为页面校验上线前混入的历史数据或非法直提数据。此类记录保留可查,
+    # 但不参与达标率统计与站点排名, 修正后自动恢复。
+    is_valid = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    invalid_reason = db.Column(db.String(255))
     measured_at = db.Column(db.DateTime, nullable=False, index=True)
     data_source = db.Column(db.String(16), nullable=False, default="manual")
     recorder = db.Column(db.String(64))
@@ -56,6 +61,8 @@ class Measurement(TimestampMixin, db.Model):
             "limit_value": self.limit_value,
             "exceed_ratio": self.exceed_ratio,
             "is_exceeded": bool(self.is_exceeded),
+            "is_valid": bool(self.is_valid),
+            "invalid_reason": self.invalid_reason,
             "measured_at": iso(self.measured_at),
             "data_source": self.data_source,
             "data_source_label": label_of(DATA_SOURCE_LABELS, self.data_source),

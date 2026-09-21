@@ -10,13 +10,15 @@
 | --- | --- | --- |
 | 运行概览 | `/overview` | 监测点规模、数据总量、超标与待标注统计、近 7 日数据量趋势、待办超标列表 |
 | 监测点台账 | `/stations` | 台账增删改查、区域/类型/状态筛选、点位详情与分因子统计、级联清理关联数据 |
-| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、超标校验预览、重复数据覆盖、录入结果回执 |
+| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、超标校验预览、重复数据覆盖、批量粘贴/文件导入、异常数据扫描与修正、录入结果回执 |
 | 超标记录标注 | `/exceedances` | 超标自动建单、单条/批量标注(确认 / 忽略 / 重置)、等级人工修正、标注留痕与统计 |
 | 数据查询 | `/query` | 多条件组合检索、聚合统计(按因子/站点/区域/日/月等)、分页浏览、CSV 导出 |
 
 设计要点:
 
 - **超标自动判定**: 数据写入时即按“因子 + 数据周期”取用限值, 计算超标倍数并分级, 同步生成待标注超标记录; 修正数据后超标记录自动更新或撤销。
+- **服务端数值合理性闸门**: 负值、NaN/无穷大、明显不合理的极大值在服务端统一拦截(`backend/app/domain/value_gate.py`),手工录入、超标预览、批量粘贴与文件导入共用同一判定; 整批先校验后写库, 任一非法则整批拒绝、不留记录、不影响统计。前端范围由 `/api/measurements/value-policy` 下发, 页面提示与服务端同口径。
+- **历史脏数据治理**: 上线前混入的负值/超量程数据可通过启动自动扫描或 `flask quality-scan` 识别并标记(`is_valid=False`), 保留可查但不参与达标率、均值与站点排名, 统计接口单独给出异常数量; 在列表中“修正”后按与新录入完全相同的口径重新判定超标并重算全部统计, 也可直接删除。
 - **业务规则集中在后端**: 限值与分级规则位于 `backend/app/domain/`, 前端仅做展示与前置校验, 避免规则分叉。
 - **模块化组织**: 后端按 `api / services / models / domain / utils` 分层; 前端每个业务模块独占目录, 公共能力沉淀在 `components/`、`hooks/`、`api/`。
 
@@ -28,7 +30,7 @@
 | 数据库 | SQLite(默认, 零依赖) / PostgreSQL 16(可选, compose 覆盖文件) |
 | 前端 | React 18 · React Router 6 · Vite 7 · Axios · 原生 CSS(设计令牌 + 组件类) |
 | 部署 | Docker 多阶段构建 · Nginx 静态托管与 `/api` 反向代理 · docker compose |
-| 测试 | Pytest(43 个后端用例: 接口 + 领域规则) |
+| 测试 | Pytest(72 个后端用例: 接口 + 领域规则 + 服务端数值闸门 + 脏数据治理) |
 
 ## 目录结构
 
@@ -141,6 +143,23 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 - **无 1 小时限值的因子**(PM2.5、PM10 小时值)仅记录数值, 不参与超标判定, 避免误报。
 - **标注状态**: `待标注(pending)` 由系统自动创建, 人工标注为 `已确认(confirmed)` 或 `已忽略(ignored)`; 确认与忽略都必须填写标注说明, 用于后续追溯。
 
+## 监测值合理性闸门与数据质量
+
+页面上的 `min/max` 只是输入辅助, 真正的判定在服务端 `backend/app/domain/value_gate.py`, 所有写库入口共用:
+
+| 拦截类型 | 规则 | 失败行为 |
+| --- | --- | --- |
+| 非数字 / NaN / Infinity | 必须为有限数字 | 整批 422, 不写任何记录 |
+| 负数 | `value < 0`(0 与正值合法) | 整批 422 |
+| 超量程极大值 | 分因子上限: PM2.5 1000、PM10 2000、SO₂/NO₂/O₃ 1000 μg/m³, CO 100 mg/m³(绝对兜底 10000) | 整批 422 |
+
+- **成组录入 / 超标预览 / 批量导入** 先在服务端校验整批数据, 再在单个事务内写入; 批量导入(`POST /api/measurements/import`, 支持 Excel 粘贴 TSV 与 CSV 文件)中任一行非法都会整批回滚。
+- **历史脏数据**: 老库启动时会自动补齐质量列(`app/migrations.py`, 无需重置库)并回扫一次, 也可随时执行 `flask quality-scan`。命中规则的记录被标记 `is_valid=false` 并写明原因:
+  - 在数据列表与导出中**保留可查**(可用"数据质量 = 仅异常"筛选);
+  - **不进入**达标率、超标率、均值、聚合统计、站点排名、待办计数, 各统计接口通过 `invalid_count` / `quality-summary` 单独说明;
+  - 在列表中点"修正"填入合理值后, 记录恢复有效并按与新录入**完全相同的口径**重算超标判定, 达标率与排名立即更新; 也可直接删除。
+- 前端合理范围统一取自 `GET /api/measurements/value-policy`, 不写死第二份口径。
+
 ## API 概览
 
 统一前缀 `/api`, 成功直接返回数据对象; 失败返回 `{"error": {"code": "...", "message": "...", "fields": {...}}}`。
@@ -157,9 +176,14 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | GET | `/api/stations/summary` | 台账规模统计 |
 | GET | `/api/measurements` | 监测数据分页查询(含筛选汇总) |
 | POST | `/api/measurements/entries` | **成组录入**: 一个监测点 + 一个时刻 + 多个因子 |
-| POST | `/api/measurements/preview` | 超标校验预览(不写库) |
+| POST | `/api/measurements/import` | **批量粘贴/文件导入**: 多组快照单事务提交, 与手工录入同一服务端闸门 |
+| PATCH | `/api/measurements/{id}/correct` | 修正(历史异常)数据, 超标判定与统计按同口径重算 |
+| POST | `/api/measurements/preview` | 超标校验预览(不写库, 同样执行合理性闸门) |
+| GET | `/api/measurements/value-policy` | 监测值合理范围(最小值/分因子量程上限), 供前端共用 |
+| GET | `/api/measurements/quality-summary` | 异常数据单独统计(按因子/原因) |
+| POST | `/api/measurements/quality-scan` | 全量回扫历史数据并标记异常(不删除) |
 | DELETE | `/api/measurements/{id}` | 删除监测数据 |
-| GET | `/api/measurements/export` | 按条件导出 CSV |
+| GET | `/api/measurements/export` | 按条件导出 CSV(含"数据是否有效/异常原因"列) |
 | GET | `/api/exceedances` | 超标记录查询(含筛选统计) |
 | GET | `/api/exceedances/{id}` | 超标记录详情(含关联监测数据) |
 | PATCH | `/api/exceedances/{id}` | 单条标注 |
@@ -205,7 +229,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | 表 | 关键字段 | 说明 |
 | --- | --- | --- |
 | `stations` | `code`(唯一) `name` `area` `station_type` `status` `longitude/latitude` `installed_at` | 监测点台账 |
-| `measurements` | `station_id` `pollutant` `period` `value` `limit_value` `exceed_ratio` `is_exceeded` `measured_at` `data_source` `recorder` | 监测数据; `(station_id, pollutant, period, measured_at)` 唯一 |
+| `measurements` | `station_id` `pollutant` `period` `value` `limit_value` `exceed_ratio` `is_exceeded` `is_valid` `invalid_reason` `measured_at` `data_source` `recorder` | 监测数据; `(station_id, pollutant, period, measured_at)` 唯一; `is_valid=False` 的异常记录保留可查但不进统计 |
 | `exceedances` | `measurement_id`(唯一) `status` `level` `note` `annotator` `annotated_at` | 超标记录与人工标注 |
 
 删除监测点会级联清理其监测数据与超标记录; 删除监测数据会同时删除对应超标记录。
@@ -228,7 +252,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 
 ```bash
 cd backend
-python -m pytest -q          # 43 个用例: 台账 CRUD/级联、录入与超标判定、标注规则、查询统计与导出、元数据接口
+python -m pytest -q          # 72 个用例: 台账 CRUD/级联、录入闸门与超标判定、批量导入、脏数据扫描/修正/统计口径、标注规则、查询统计与导出、元数据接口
 
 cd frontend
 npm run build                # 生产构建校验
@@ -238,8 +262,9 @@ npm run build                # 生产构建校验
 
 ```bash
 curl http://localhost:5000/api/meta/health
-python -m flask --app wsgi stats      # 查看监测点/数据/超标记录数量
-python -m flask --app wsgi reset-db   # 重置数据库并重建演示数据
+python -m flask --app wsgi stats         # 查看监测点/数据/超标记录数量
+python -m flask --app wsgi quality-scan  # 回扫历史数据, 标记负值/超量程异常值 (--rescan-all 连已标记一起重判)
+python -m flask --app wsgi reset-db      # 重置数据库并重建演示数据
 ```
 
 ## 常见问题

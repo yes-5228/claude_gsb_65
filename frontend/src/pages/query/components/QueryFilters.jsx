@@ -25,6 +25,12 @@ const SOURCE_OPTIONS = [
   { value: 'import', label: '历史导入' }
 ]
 
+const QUALITY_OPTIONS = [
+  { value: 'valid', label: '仅有效数据' },
+  { value: 'invalid', label: '仅异常数据' },
+  { value: 'all', label: '全部(含异常)' }
+]
+
 export default function QueryFilters({ value, loading, onSubmit, onReset }) {
   const [draft, setDraft] = useState(value)
   const { data: stationData } = useStationOptions()
@@ -97,6 +103,9 @@ export default function QueryFilters({ value, loading, onSubmit, onReset }) {
       </Field>
       <Field label="数据来源">
         <Select value={draft.data_source || ''} onChange={update('data_source')} placeholder="全部来源" options={SOURCE_OPTIONS} />
+      </Field>
+      <Field label="数据质量">
+        <Select value={draft.quality || 'all'} onChange={update('quality')} options={QUALITY_OPTIONS} />
       </Field>
       <Field label="开始日期">
         <Input type="date" value={draft.date_from || ''} onChange={update('date_from')} />

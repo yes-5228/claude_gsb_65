@@ -9,6 +9,12 @@ from ..extensions import db
 from ..models import Exceedance, Measurement, Station
 from ..models.base import iso
 
+# 达标率与站点排名只看通过合理性闸门的数据; 异常历史数据通过质量扫描单独说明。
+def _valid_only(query):
+    return query.join(Measurement, Exceedance.measurement_id == Measurement.id).filter(
+        Measurement.is_valid.is_(True)
+    )
+
 STATUS_CHOICES = tuple(EXCEEDANCE_STATUS_LABELS.keys())
 LEVEL_CHOICES = tuple(EXCEEDANCE_LEVEL_LABELS.keys())
 
@@ -48,8 +54,22 @@ def get_exceedance(exceedance_id):
     return exceedance
 
 
-def exceedance_query(args):
+def exceedance_query(args, include_invalid=False):
     query = db.session.query(Exceedance).join(Station, Exceedance.station_id == Station.id)
+    quality = str(args.get("quality") or "").strip()
+    if quality == "invalid":
+        # 显式只看异常数据关联的超标单 (用于排查历史脏数据)。
+        query = (
+            query.join(Measurement, Exceedance.measurement_id == Measurement.id)
+            .filter(Measurement.is_valid.is_(False))
+        )
+    elif quality == "all" and include_invalid:
+        # 调用方明确要求且参数为 all 时才返回全部。
+        pass
+    else:
+        # 默认及 quality=valid: 排除未通过合理性闸门的历史异常数据,
+        # 避免其污染待办计数与站点排名。
+        query = _valid_only(query)
 
     statuses = _split(args.get("status"))
     if statuses:
@@ -178,11 +198,19 @@ def annotate_batch(ids, status, note=None, annotator=None, level=None):
 
 
 def summary(args):
-    """Dashboard counters for the annotation work bench."""
+    """Dashboard counters for the annotation work bench (valid data only)."""
     base = exceedance_query(args)
     subquery = base.with_entities(Exceedance.id, Exceedance.station_id,
                                   Exceedance.status, Exceedance.level,
                                   Exceedance.pollutant, Exceedance.exceed_ratio).subquery()
+
+    # 关联到异常监测数据的超标记录: 不参与统计, 仅单独提示数量。
+    invalid_count = (
+        db.session.query(func.count(Exceedance.id))
+        .join(Measurement, Exceedance.measurement_id == Measurement.id)
+        .filter(Measurement.is_valid.is_(False))
+        .scalar()
+    )
 
     by_status = {
         status: {"key": status, "label": label, "count": 0}
@@ -242,6 +270,7 @@ def summary(args):
 
     return {
         "total": int(totals[0] or 0),
+        "invalid_count": int(invalid_count or 0),
         "pending": by_status["pending"]["count"],
         "by_status": list(by_status.values()),
         "by_level": list(by_level.values()),

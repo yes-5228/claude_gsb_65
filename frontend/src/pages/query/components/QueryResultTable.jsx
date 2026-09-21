@@ -15,16 +15,25 @@ export default function QueryResultTable({ rows, loading }) {
       title: '监测值',
       align: 'right',
       render: (row) => (
-        <span className={row.is_exceeded ? 'danger-text strong' : ''}>
+        <span style={{ color: !row.is_valid ? 'var(--warning)' : undefined }} className={row.is_exceeded && row.is_valid ? 'danger-text strong' : ''}>
           {formatNumber(row.value)} <span className="muted small">{row.unit}</span>
         </span>
       )
     },
     { key: 'limit_value', title: '限值', align: 'right', render: (row) => (row.limit_value === null ? '无限值' : formatNumber(row.limit_value)) },
     {
+      key: 'quality',
+      title: '质量',
+      render: (row) =>
+        row.is_valid ? <Tag tone="success">有效</Tag> : <Tag tone="warning" title={row.invalid_reason}>异常</Tag>
+    },
+    {
       key: 'is_exceeded',
       title: '超标',
-      render: (row) => (row.is_exceeded ? <Tag tone="danger">是</Tag> : <Tag tone="success">否</Tag>)
+      render: (row) => {
+        if (!row.is_valid) return <Tag tone="neutral">不计入</Tag>
+        return row.is_exceeded ? <Tag tone="danger">是</Tag> : <Tag tone="success">否</Tag>
+      }
     },
     {
       key: 'exceedance_status',

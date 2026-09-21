@@ -56,15 +56,23 @@ export default function OverviewPage() {
             .join(' · ')}
         />
         <StatCard
-          label="监测数据总量"
+          label="有效监测数据"
           value={measurements.total}
-          foot={`覆盖 ${measurements.station_count} 个监测点 · 均值 ${formatNumber(measurements.avg_value)}`}
+          tone={measurements.anomaly_count ? 'warning' : undefined}
+          foot={
+            `覆盖 ${measurements.station_count} 个监测点 · 均值 ${formatNumber(measurements.avg_value)}` +
+            (measurements.anomaly_count ? ` · 异常 ${measurements.anomaly_count} 条未计入` : '')
+          }
         />
         <StatCard
           label="超标记录"
           value={exceedances.total}
           tone={exceedances.total ? 'danger' : undefined}
-          foot={`超标率 ${formatPercent(measurements.exceed_rate)} · 最大 ${formatRatio(exceedances.max_ratio)}`}
+          foot={
+            `超标率 ${measurements.exceed_rate == null ? '-' : formatPercent(measurements.exceed_rate)}` +
+            ` · 达标率 ${measurements.compliance_rate == null ? '-' : formatPercent(measurements.compliance_rate)}` +
+            (exceedances.anomaly_count ? ` · 异常单 ${exceedances.anomaly_count}` : ` · 最大 ${formatRatio(exceedances.max_ratio)}`)
+          }
         />
         <StatCard
           label="待标注超标"

@@ -15,6 +15,12 @@ const LEVEL_OPTIONS = [
   { value: 'severe', label: '重度超标' }
 ]
 
+const ANOMALY_OPTIONS = [
+  { value: 'exclude', label: '排除异常值' },
+  { value: 'only', label: '仅看异常值' },
+  { value: 'include', label: '包含异常值' }
+]
+
 export default function ExceedanceFilters({ value, loading, onSubmit, onReset }) {
   const [draft, setDraft] = useState(value)
   const { data: stationData } = useStationOptions()
@@ -31,10 +37,13 @@ export default function ExceedanceFilters({ value, loading, onSubmit, onReset })
       loading={loading}
       onSearch={() => onSubmit(draft)}
       onReset={() => {
-        setDraft({ status: '', level: '', pollutant: '', station_id: '', date_from: '', date_to: '', keyword: '' })
+        setDraft({ status: '', level: '', pollutant: '', station_id: '', anomaly: 'exclude', date_from: '', date_to: '', keyword: '' })
         onReset()
       }}
     >
+      <Field label="异常值" hint="由明显错误的监测值产生的超标单">
+        <Select value={draft.anomaly || 'exclude'} onChange={update('anomaly')} options={ANOMALY_OPTIONS} />
+      </Field>
       <Field label="标注状态">
         <Select value={draft.status || ''} onChange={update('status')} placeholder="全部状态" options={STATUS_OPTIONS} />
       </Field>

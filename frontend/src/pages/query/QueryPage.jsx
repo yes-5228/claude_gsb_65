@@ -9,7 +9,7 @@ import { useToast } from '../../components/common/ToastProvider.jsx'
 import { useAsyncData } from '../../hooks/useAsyncData.js'
 import { useListQuery } from '../../hooks/useListQuery.js'
 import { saveBlob } from '../../utils/download.js'
-import { formatDateTime, formatNumber, formatPercent } from '../../utils/format.js'
+import { formatNumber, formatPercent } from '../../utils/format.js'
 import QueryFilters from './components/QueryFilters.jsx'
 import QueryResultTable from './components/QueryResultTable.jsx'
 import StatisticsPanel from './components/StatisticsPanel.jsx'
@@ -21,6 +21,7 @@ const INITIAL_FILTERS = {
   pollutant: '',
   period: '',
   is_exceeded: '',
+  anomaly: 'exclude',
   exceedance_status: '',
   data_source: '',
   date_from: '',
@@ -73,21 +74,33 @@ export default function QueryPage() {
       {query.error ? <Alert tone="error">{query.error.message}</Alert> : null}
 
       <div className="stat-grid">
-        <StatCard label="符合条件的数据量" value={summary ? summary.total : '-'} foot={summary ? `涉及 ${summary.station_count} 个监测点` : ''} />
+        <StatCard
+          label="有效数据量"
+          value={summary ? summary.total : '-'}
+          foot={summary ? `涉及 ${summary.station_count} 个监测点${summary.anomaly_count ? ` · 另有异常值 ${summary.anomaly_count} 条未计入` : ''}` : ''}
+          tone={summary?.anomaly_count ? 'warning' : undefined}
+        />
         <StatCard
           label="超标记录"
           value={summary ? summary.exceeded_count : '-'}
           tone={summary?.exceeded_count ? 'danger' : undefined}
-          foot={summary ? `超标率 ${formatPercent(summary.exceed_rate)}` : ''}
+          foot={summary ? `超标率 ${summary.exceed_rate == null ? '-' : formatPercent(summary.exceed_rate)}` : ''}
         />
-        <StatCard label="平均浓度" value={summary ? formatNumber(summary.avg_value) : '-'} foot="按当前筛选范围计算" />
         <StatCard
-          label="时间范围"
-          value={summary ? formatDateTime(summary.first_measured_at).slice(5, 10) : '-'}
-          unit={summary ? `~ ${formatDateTime(summary.last_measured_at).slice(5, 10)}` : ''}
-          foot={summary ? `${formatDateTime(summary.first_measured_at)} ~ ${formatDateTime(summary.last_measured_at)}` : ''}
+          label="达标记录"
+          value={summary ? summary.compliant_count : '-'}
+          tone={summary ? 'success' : undefined}
+          foot={summary ? `达标率 ${summary.compliance_rate == null ? '-' : formatPercent(summary.compliance_rate)}` : ''}
         />
+        <StatCard label="平均浓度" value={summary ? formatNumber(summary.avg_value) : '-'} foot="按当前筛选范围有效数据计算" />
       </div>
+      {summary?.anomaly_count ? (
+        <Alert tone="warning">
+          当前筛选范围内另有 {summary.anomaly_count} 条历史异常数据 (负数或超出物理量程),
+          未计入上方数据量、达标率/超标率与平均浓度。将“异常值”切到“仅看异常值”可定位这些记录,
+          删除或以正确数值覆盖重提后, 达标率与各分组排名会按同一口径自动重算。
+        </Alert>
+      ) : null}
 
       <StatisticsPanel
         params={statsParams}

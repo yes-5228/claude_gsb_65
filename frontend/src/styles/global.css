@@ -106,6 +106,7 @@ a { color: var(--primary); text-decoration: none; }
 .text-right { text-align: right; }
 .strong { font-weight: 600; }
 .danger-text { color: var(--danger); }
+.warning-text { color: var(--warning); font-weight: 600; }
 .success-text { color: var(--success); }
 
 /* ---------- buttons ---------- */

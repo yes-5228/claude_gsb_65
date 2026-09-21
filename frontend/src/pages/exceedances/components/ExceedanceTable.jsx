@@ -31,8 +31,15 @@ export default function ExceedanceTable({
       className: 'cell-nowrap',
       render: (row) => (
         <span>
-          <span className="danger-text strong">{formatNumber(row.value)}</span>
+          <span className={row.is_anomaly ? 'warning-text strong' : 'danger-text strong'}>
+            {formatNumber(row.value)}
+          </span>
           <span className="muted"> / {formatNumber(row.limit_value)} {row.unit || ''}</span>
+          {row.is_anomaly ? (
+            <div className="small warning-text" title="该值超出物理合理范围, 未参与排名统计">
+              异常值
+            </div>
+          ) : null}
         </span>
       )
     },

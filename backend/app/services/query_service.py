@@ -10,6 +10,7 @@ from ..domain.constants import (
     STATION_TYPE_LABELS,
 )
 from ..domain.standards import POLLUTANT_CODES, get_pollutant
+from ..domain.value_validation import sql_anomaly_condition
 from ..errors import ValidationError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
@@ -19,6 +20,8 @@ from ..utils.validation import parse_date
 GROUP_BY_CHOICES = ("station", "area", "pollutant", "period", "day", "month", "data_source")
 METRIC_CHOICES = ("avg", "max", "min", "count", "sum")
 SORT_CHOICES = ("measured_at", "value", "exceed_ratio", "pollutant", "station_code", "created_at")
+# 异常值筛选: exclude=统计口径默认, 排除录入错误; only=仅看历史脏数据; include=不做区分
+ANOMALY_CHOICES = ("exclude", "only", "include")
 
 
 def _split(value):
@@ -84,6 +87,7 @@ def parse_filters(args):
         "periods": periods,
         "data_sources": _split(args.get("data_source")),
         "is_exceeded": _bool_arg(args, "is_exceeded"),
+        "anomaly": (args.get("anomaly") or "exclude").strip(),
         "exceedance_status": _split(args.get("exceedance_status")),
         "date_from": _date_arg(args, "date_from"),
         "date_to": _date_arg(args, "date_to", end_of_day=True),
@@ -105,6 +109,16 @@ def parse_filters(args):
     return filters
 
 
+def apply_anomaly_filter(query, mode):
+    """Apply the anomaly policy shared by list browsing and every statistic."""
+    condition = sql_anomaly_condition(Measurement)
+    if mode == "exclude":
+        return query.filter(~condition)
+    if mode == "only":
+        return query.filter(condition)
+    return query
+
+
 def apply_filters(query, filters):
     query = query.join(Station, Measurement.station_id == Station.id)
     if filters["station_ids"]:
@@ -119,6 +133,7 @@ def apply_filters(query, filters):
         query = query.filter(Measurement.period.in_(filters["periods"]))
     if filters["data_sources"]:
         query = query.filter(Measurement.data_source.in_(filters["data_sources"]))
+    query = apply_anomaly_filter(query, filters.get("anomaly", "exclude"))
     if filters["is_exceeded"] is not None:
         query = query.filter(Measurement.is_exceeded.is_(filters["is_exceeded"]))
     if filters["date_from"]:
@@ -164,7 +179,12 @@ def measurement_query(args):
 
 
 def summary(filters):
-    """Aggregate counters shown above the query result table."""
+    """Aggregate counters shown above the query result table.
+
+    达标率/超标率与平均值等指标只按有效数据 (排除异常值) 计算;
+    同一筛选范围内的异常值单独计数, 供页面说明“另有 N 条异常值未参与统计”。
+    """
+    valid_filters = {**filters, "anomaly": "exclude"}
     query = apply_filters(
         db.session.query(
             func.count(Measurement.id),
@@ -174,15 +194,22 @@ def summary(filters):
             func.max(Measurement.measured_at),
             func.avg(Measurement.value),
         ),
-        filters,
+        valid_filters,
     )
     total, exceeded, stations, first_at, last_at, avg_value = query.one()
     total = int(total or 0)
     exceeded = int(exceeded or 0)
+    anomaly_count = (
+        apply_filters(db.session.query(func.count(Measurement.id)), {**filters, "anomaly": "only"})
+        .scalar()
+    )
     return {
         "total": total,
         "exceeded_count": exceeded,
-        "exceed_rate": round(exceeded / total, 4) if total else 0.0,
+        "compliant_count": total - exceeded,
+        "exceed_rate": round(exceeded / total, 4) if total else None,
+        "compliance_rate": round((total - exceeded) / total, 4) if total else None,
+        "anomaly_count": int(anomaly_count or 0),
         "station_count": int(stations or 0),
         "first_measured_at": iso(first_at),
         "last_measured_at": iso(last_at),
@@ -200,8 +227,62 @@ def _metric_expression(metric):
     }[metric]
 
 
+def _grouped_query(group_by, value_expr, with_valid_only):
+    """Build the dimension-specific grouped query (without user filters)."""
+    if group_by == "station":
+        query = db.session.query(
+            Station.id.label("station_id"),
+            Station.code.label("station_code"),
+            Station.name.label("station_name"),
+            Station.area.label("area"),
+            value_expr,
+            func.count(Measurement.id).label("row_count"),
+            func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded_count"),
+        ).group_by(Station.id, Station.code, Station.name, Station.area)
+        return False, query
+    if group_by == "area":
+        query = db.session.query(
+            Station.area.label("area"), value_expr,
+            func.count(Measurement.id).label("row_count"),
+            func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded_count"),
+        ).group_by(Station.area)
+        return False, query
+    if group_by == "day":
+        bucket = func.date(Measurement.measured_at).label("bucket")
+        query = db.session.query(
+            bucket, value_expr,
+            func.count(Measurement.id).label("row_count"),
+            func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded_count"),
+        ).group_by(bucket)
+        return True, query
+    if group_by == "month":
+        year = func.extract("year", Measurement.measured_at).label("year")
+        month = func.extract("month", Measurement.measured_at).label("month")
+        query = db.session.query(
+            year, month, value_expr,
+            func.count(Measurement.id).label("row_count"),
+            func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded_count"),
+        ).group_by(year, month)
+        return True, query
+    column = {
+        "pollutant": Measurement.pollutant,
+        "period": Measurement.period,
+        "data_source": Measurement.data_source,
+    }[group_by]
+    query = db.session.query(
+        column.label("bucket"), value_expr,
+        func.count(Measurement.id).label("row_count"),
+        func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded_count"),
+    ).group_by(column)
+    return False, query
+
+
 def statistics(args):
-    """Grouped aggregation used by the query page statistics panel."""
+    """Grouped aggregation used by the query page statistics panel.
+
+    所有指标 (avg/max/min/sum) 与达标率一律基于有效数据 (排除异常值);
+    每个分组同时返回 anomaly_count, 与总体口径一致, 修正后自动重算。
+    """
     filters = parse_filters(args)
     group_by = args.get("group_by") or "pollutant"
     metric = args.get("metric") or "avg"
@@ -215,49 +296,18 @@ def statistics(args):
         )
 
     value_expr = _metric_expression(metric).label("metric_value")
-    count_expr = func.count(Measurement.id).label("row_count")
-    exceeded_expr = func.sum(cast(Measurement.is_exceeded, db.Integer)).label("exceeded_count")
-
-    if group_by == "station":
-        query = db.session.query(
-            Station.id.label("station_id"),
-            Station.code.label("station_code"),
-            Station.name.label("station_name"),
-            Station.area.label("area"),
-            value_expr,
-            count_expr,
-            exceeded_expr,
-        ).group_by(Station.id, Station.code, Station.name, Station.area)
-        is_time_group = False
-    elif group_by == "area":
-        query = db.session.query(
-            Station.area.label("area"), value_expr, count_expr, exceeded_expr
-        ).group_by(Station.area)
-        is_time_group = False
-    elif group_by == "day":
-        bucket = func.date(Measurement.measured_at).label("bucket")
-        query = db.session.query(bucket, value_expr, count_expr, exceeded_expr).group_by(bucket)
-        is_time_group = True
-    elif group_by == "month":
-        year = func.extract("year", Measurement.measured_at).label("year")
-        month = func.extract("month", Measurement.measured_at).label("month")
-        query = db.session.query(year, month, value_expr, count_expr, exceeded_expr).group_by(
-            year, month
-        )
-        is_time_group = True
-    else:
-        column = {
-            "pollutant": Measurement.pollutant,
-            "period": Measurement.period,
-            "data_source": Measurement.data_source,
-        }[group_by]
-        query = db.session.query(
-            column.label("bucket"), value_expr, count_expr, exceeded_expr
-        ).group_by(column)
-        is_time_group = False
-
-    query = apply_filters(query, filters)
+    is_time_group, query = _grouped_query(group_by, value_expr, with_valid_only=True)
+    query = apply_filters(query, {**filters, "anomaly": "exclude"})
     rows = query.all()
+
+    # 同维度的异常条数 (同口径单独说明, 不并入 count/超标率)
+    _, anomaly_query = _grouped_query(group_by, func.count(Measurement.id).label("metric_value"),
+                                      with_valid_only=True)
+    anomaly_query = apply_filters(anomaly_query, {**filters, "anomaly": "only"})
+    anomaly_map = {}
+    for row in anomaly_query.all():
+        data = dict(row._mapping)
+        anomaly_map[_group_key(group_by, data)] = int(data.get("row_count") or 0)
 
     items = []
     for row in rows:
@@ -265,28 +315,7 @@ def statistics(args):
         count = int(data.get("row_count") or 0)
         exceeded = int(data.get("exceeded_count") or 0)
         raw_value = data.get("metric_value")
-        if group_by == "station":
-            key = data.get("station_code")
-            label = "%s %s" % (data.get("station_code"), data.get("station_name"))
-        elif group_by == "area":
-            key = label = data.get("area")
-        elif group_by == "day":
-            key = str(data.get("bucket"))
-            label = key
-        elif group_by == "month":
-            key = "%04d-%02d" % (int(data.get("year")), int(data.get("month")))
-            label = key
-        elif group_by == "pollutant":
-            key = data.get("bucket")
-            meta = get_pollutant(key)
-            label = meta["label"] if meta else key
-        elif group_by == "period":
-            key = data.get("bucket")
-            label = PERIOD_LABELS.get(key, key)
-        else:
-            key = data.get("bucket")
-            label = DATA_SOURCE_LABELS.get(key, key)
-
+        key, label = _group_key_label(group_by, data)
         items.append(
             {
                 "key": key,
@@ -294,7 +323,10 @@ def statistics(args):
                 "value": round(float(raw_value), 2) if raw_value is not None else None,
                 "count": count,
                 "exceeded_count": exceeded,
-                "exceed_rate": round(exceeded / count, 4) if count else 0.0,
+                "compliant_count": count - exceeded,
+                "exceed_rate": round(exceeded / count, 4) if count else None,
+                "compliance_rate": round((count - exceeded) / count, 4) if count else None,
+                "anomaly_count": anomaly_map.get(key, 0),
             }
         )
 
@@ -310,8 +342,33 @@ def statistics(args):
         "totals": {
             "count": sum(item["count"] for item in items),
             "exceeded_count": sum(item["exceeded_count"] for item in items),
+            "anomaly_count": sum(item["anomaly_count"] for item in items),
         },
     }
+
+
+def _group_key(group_by, data):
+    if group_by == "station":
+        return data.get("station_code")
+    if group_by == "month":
+        return "%04d-%02d" % (int(data.get("year")), int(data.get("month")))
+    return data.get("bucket") or data.get("area")
+
+
+def _group_key_label(group_by, data):
+    key = _group_key(group_by, data)
+    if group_by == "station":
+        return key, "%s %s" % (data.get("station_code"), data.get("station_name"))
+    if group_by == "area":
+        return key, key
+    if group_by == "month" or group_by == "day":
+        return key, key
+    if group_by == "pollutant":
+        meta = get_pollutant(key)
+        return key, meta["label"] if meta else key
+    if group_by == "period":
+        return key, PERIOD_LABELS.get(key, key)
+    return key, DATA_SOURCE_LABELS.get(key, key)
 
 
 def option_payload():

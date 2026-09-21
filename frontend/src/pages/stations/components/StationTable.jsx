@@ -31,9 +31,18 @@ export default function StationTable({ rows, loading, onDetail, onEdit, onDelete
     },
     {
       key: 'stats',
-      title: '数据量',
+      title: '有效数据',
       align: 'right',
-      render: (row) => formatNumber(row.stats?.measurement_count ?? 0, 0)
+      render: (row) => (
+        <div>
+          <div>{formatNumber(row.stats?.measurement_count ?? 0, 0)}</div>
+          {row.stats?.anomaly_count ? (
+            <div className="small warning-text" title="历史异常数据条数, 未计入数据量/超标统计">
+              异常 {row.stats.anomaly_count}
+            </div>
+          ) : null}
+        </div>
+      )
     },
     {
       key: 'exceeded',

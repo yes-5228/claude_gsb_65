@@ -1,6 +1,7 @@
 """监测数据记录."""
 from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS, label_of
 from ..domain.standards import get_pollutant
+from ..domain.value_validation import is_anomalous_value
 from ..extensions import db
 from .base import TimestampMixin, iso
 
@@ -56,6 +57,7 @@ class Measurement(TimestampMixin, db.Model):
             "limit_value": self.limit_value,
             "exceed_ratio": self.exceed_ratio,
             "is_exceeded": bool(self.is_exceeded),
+            "is_anomaly": is_anomalous_value(self.pollutant, self.value),
             "measured_at": iso(self.measured_at),
             "data_source": self.data_source,
             "data_source_label": label_of(DATA_SOURCE_LABELS, self.data_source),

@@ -24,7 +24,16 @@ export default function QueryResultTable({ rows, loading }) {
     {
       key: 'is_exceeded',
       title: '超标',
-      render: (row) => (row.is_exceeded ? <Tag tone="danger">是</Tag> : <Tag tone="success">否</Tag>)
+      render: (row) =>
+        row.is_anomaly ? (
+          <Tag tone="warning" title="监测值超出物理合理范围, 未参与达标率与排名统计">
+            异常值
+          </Tag>
+        ) : row.is_exceeded ? (
+          <Tag tone="danger">是</Tag>
+        ) : (
+          <Tag tone="success">否</Tag>
+        )
     },
     {
       key: 'exceedance_status',

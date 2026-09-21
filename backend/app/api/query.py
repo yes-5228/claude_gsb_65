@@ -26,6 +26,7 @@ def query_statistics():
 @bp.get("/export")
 def query_export():
     from ..utils.csv_export import csv_response
+    from ..domain.value_validation import is_anomalous_value
 
     query, _ = query_service.measurement_query(request.args)
     rows = query.limit(current_app.config["MAX_EXPORT_ROWS"]).all()
@@ -39,6 +40,7 @@ def query_export():
         ("单位", "unit"),
         ("限值", "limit_value"),
         ("是否超标", lambda row: "是" if row.is_exceeded else "否"),
+        ("异常值", lambda row: "是" if is_anomalous_value(row.pollutant, row.value) else "否"),
         ("超标倍数", "exceed_ratio"),
         ("监测时间", lambda row: row.measured_at.strftime("%Y-%m-%d %H:%M")),
         ("数据来源", lambda row: DATA_SOURCE_LABELS.get(row.data_source, row.data_source)),
@@ -52,7 +54,7 @@ def query_options():
     payload = query_service.option_payload()
     payload["pollutants"] = [
         {"value": item["code"], "label": item["label"], "unit": item["unit"],
-         "limits": item["limits"]}
+         "limits": item["limits"], "value_max": item["value_max"]}
         for item in POLLUTANTS.values()
     ]
     payload["periods"] = [{"value": key, "label": label} for key, label in PERIOD_LABELS.items()]
@@ -61,5 +63,10 @@ def query_options():
     ]
     payload["data_sources"] = [
         {"value": key, "label": label} for key, label in DATA_SOURCE_LABELS.items()
+    ]
+    payload["anomaly"] = [
+        {"value": "exclude", "label": "排除异常值(统计口径)"},
+        {"value": "only", "label": "仅看异常值"},
+        {"value": "include", "label": "包含异常值"},
     ]
     return payload

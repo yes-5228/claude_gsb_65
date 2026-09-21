@@ -42,6 +42,7 @@ def exceedance_options():
 @bp.get("/export")
 def export_exceedances():
     from ..utils.csv_export import csv_response
+    from ..domain.value_validation import is_anomalous_value
 
     rows = exceedance_service.exceedance_query(request.args).limit(
         current_app.config["MAX_EXPORT_ROWS"]
@@ -51,6 +52,7 @@ def export_exceedances():
         ("站点名称", lambda row: row.station.name if row.station else ""),
         ("监测因子", "pollutant"),
         ("监测值", "value"),
+        ("异常值", lambda row: "是" if is_anomalous_value(row.pollutant, row.value) else "否"),
         ("限值", "limit_value"),
         ("超标倍数", "exceed_ratio"),
         ("超标等级", lambda row: EXCEEDANCE_LEVEL_LABELS.get(row.level, row.level)),

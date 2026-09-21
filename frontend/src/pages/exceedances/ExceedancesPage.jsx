@@ -16,6 +16,7 @@ const INITIAL_FILTERS = {
   level: '',
   pollutant: '',
   station_id: '',
+  anomaly: 'exclude',
   date_from: '',
   date_to: '',
   keyword: ''
@@ -70,6 +71,14 @@ export default function ExceedancesPage() {
   return (
     <>
       <ExceedanceSummaryCards summary={query.summary} />
+
+      {query.summary?.anomaly_count ? (
+        <Alert tone="warning">
+          另有 {query.summary.anomaly_count} 条超标单由明显错误的监测值 (负数/超量程) 产生,
+          未计入上方排名与等级分布。请到“数据查询”页把异常值切为“仅看异常值”,
+          删除或以正确数值覆盖重提后, 超标单与排名会同步重算。
+        </Alert>
+      ) : null}
 
       <ExceedanceFilters
         value={query.filters}

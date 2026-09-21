@@ -17,8 +17,14 @@ export default function StationDetailDrawer({ stationId, onClose, onEdit }) {
 
   const columns = [
     { key: 'pollutant', title: '监测因子' },
-    { key: 'count', title: '数据量', align: 'right' },
+    { key: 'count', title: '有效数据', align: 'right' },
     { key: 'exceeded_count', title: '超标', align: 'right', render: (row) => (row.exceeded_count ? <span className="danger-text">{row.exceeded_count}</span> : '0') },
+    {
+      key: 'anomaly_count',
+      title: '异常值',
+      align: 'right',
+      render: (row) => (row.anomaly_count ? <span className="warning-text">{row.anomaly_count}</span> : '0')
+    },
     { key: 'avg_value', title: '均值', align: 'right', render: (row) => formatNumber(row.avg_value) },
     { key: 'max_value', title: '最大值', align: 'right', render: (row) => formatNumber(row.max_value) }
   ]
@@ -73,7 +79,7 @@ export default function StationDetailDrawer({ stationId, onClose, onEdit }) {
           </dl>
           <div className="stat-grid">
             <div className="stat-card">
-              <div className="stat-label">累计监测数据</div>
+              <div className="stat-label">有效监测数据</div>
               <div className="stat-value">{stats.measurement_count ?? 0}</div>
             </div>
             <div className="stat-card">
@@ -84,6 +90,12 @@ export default function StationDetailDrawer({ stationId, onClose, onEdit }) {
               <div className="stat-label">待标注</div>
               <div className="stat-value" style={{ color: 'var(--warning)' }}>
                 {stats.pending_count ?? 0}
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">异常值(未计入)</div>
+              <div className="stat-value" style={{ color: stats.anomaly_count ? 'var(--warning)' : 'var(--text-muted)' }}>
+                {stats.anomaly_count ?? 0}
               </div>
             </div>
           </div>

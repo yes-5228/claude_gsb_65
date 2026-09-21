@@ -86,10 +86,15 @@ export default function EntryForm({ onPreview, onSubmitted }) {
     if (!form.measured_at) next.measured_at = '请选择监测时间'
     if (filled.length === 0) next.entries = '至少填写一个因子的监测值'
     filled.forEach(([pollutant, raw]) => {
+      const meta = pollutants.find((item) => item.code === pollutant)
       const number = Number(raw)
-      if (Number.isNaN(number)) next[pollutant] = '监测值必须是数字'
-      else if (number < 0) next[pollutant] = '监测值不能为负数'
-      else if (number > 10000) next[pollutant] = '监测值超出合理范围, 请检查是否录错'
+      if (raw === '' || Number.isNaN(number) || !Number.isFinite(number)) {
+        next[pollutant] = '监测值必须是有限数字'
+      } else if (number < 0) {
+        next[pollutant] = '监测值不能为负数'
+      } else if (meta?.value_max != null && number > meta.value_max) {
+        next[pollutant] = `监测值超出合理范围(0 ~ ${meta.value_max} ${meta.unit}), 请检查是否录错`
+      }
     })
     setErrors(next)
     if (Object.keys(next).length) {
@@ -236,6 +241,7 @@ export default function EntryForm({ onPreview, onSubmitted }) {
                         type="number"
                         step="0.01"
                         min="0"
+                        max={pollutant.value_max}
                         value={values[pollutant.code] ?? ''}
                         onChange={setValue(pollutant.code)}
                         invalid={Boolean(errors[pollutant.code])}

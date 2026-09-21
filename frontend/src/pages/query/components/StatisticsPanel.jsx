@@ -67,9 +67,11 @@ export default function StatisticsPanel({ params, onChange, data, loading, error
                   <tr>
                     <th>分组</th>
                     <th className="text-right">{isCount ? '数据条数' : '统计值'}</th>
-                    <th className="text-right">数据量</th>
+                    <th className="text-right">有效数据</th>
                     <th className="text-right">超标数</th>
                     <th className="text-right">超标率</th>
+                    <th className="text-right">达标率</th>
+                    <th className="text-right">异常值</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -79,13 +81,31 @@ export default function StatisticsPanel({ params, onChange, data, loading, error
                       <td className="text-right strong">{formatNumber(item.value)}</td>
                       <td className="text-right">{item.count}</td>
                       <td className="text-right danger-text">{item.exceeded_count}</td>
-                      <td className="text-right">{formatPercent(item.exceed_rate)}</td>
+                      <td className="text-right">{item.exceed_rate == null ? '-' : formatPercent(item.exceed_rate)}</td>
+                      <td className="text-right">
+                        {item.compliance_rate == null ? '-' : formatPercent(item.compliance_rate)}
+                      </td>
+                      <td className="text-right">
+                        {item.anomaly_count ? (
+                          <span className="warning-text" title="该组历史异常数据条数, 未计入左侧统计与排名">
+                            {item.anomaly_count}
+                          </span>
+                        ) : (
+                          0
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </>
+        ) : null}
+        {items.length > 0 && data?.totals?.anomaly_count ? (
+          <div className="small muted">
+            注: 各分组指标与排序均只基于有效数据, 另有 {data.totals.anomaly_count} 条历史异常数据未计入,
+            修正 (删除或以正确数值覆盖) 后本表自动按同一口径重算。
+          </div>
         ) : null}
       </div>
     </SectionCard>

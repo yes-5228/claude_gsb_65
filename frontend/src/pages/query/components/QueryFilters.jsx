@@ -19,6 +19,12 @@ const ANNOTATION_OPTIONS = [
   { value: 'ignored', label: '已忽略' }
 ]
 
+const ANOMALY_OPTIONS = [
+  { value: 'exclude', label: '排除异常值(统计口径)' },
+  { value: 'only', label: '仅看异常值' },
+  { value: 'include', label: '包含异常值' }
+]
+
 const SOURCE_OPTIONS = [
   { value: 'manual', label: '手工录入' },
   { value: 'device', label: '设备上传' },
@@ -43,7 +49,7 @@ export default function QueryFilters({ value, loading, onSubmit, onReset }) {
       onReset={() => {
         setDraft({
           keyword: '', station_id: '', area: '', pollutant: '', period: '',
-          is_exceeded: '', exceedance_status: '', data_source: '',
+          is_exceeded: '', anomaly: 'exclude', exceedance_status: '', data_source: '',
           date_from: '', date_to: '', min_value: '', max_value: ''
         })
         onReset()
@@ -86,6 +92,9 @@ export default function QueryFilters({ value, loading, onSubmit, onReset }) {
       </Field>
       <Field label="是否超标">
         <Select value={draft.is_exceeded || ''} onChange={update('is_exceeded')} placeholder="全部" options={EXCEEDED_OPTIONS} />
+      </Field>
+      <Field label="异常值" hint="负数 / 超量程的历史脏数据, 默认不参与统计">
+        <Select value={draft.anomaly || 'exclude'} onChange={update('anomaly')} options={ANOMALY_OPTIONS} />
       </Field>
       <Field label="标注状态">
         <Select

@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import cast, func, or_
 
 from ..domain.constants import EXCEEDANCE_LEVEL_LABELS, EXCEEDANCE_STATUS_LABELS
+from ..domain.value_validation import sql_anomaly_condition
 from ..errors import NotFoundError, ValidationError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
@@ -11,6 +12,11 @@ from ..models.base import iso
 
 STATUS_CHOICES = tuple(EXCEEDANCE_STATUS_LABELS.keys())
 LEVEL_CHOICES = tuple(EXCEEDANCE_LEVEL_LABELS.keys())
+
+
+def anomaly_condition():
+    """超标行带有独立的 pollutant/value 副本, 复用同一套异常值判定口径。"""
+    return sql_anomaly_condition(Exceedance)
 
 
 def _split(value):
@@ -50,6 +56,12 @@ def get_exceedance(exceedance_id):
 
 def exceedance_query(args):
     query = db.session.query(Exceedance).join(Station, Exceedance.station_id == Station.id)
+
+    anomaly_mode = (args.get("anomaly") or "exclude").strip()
+    if anomaly_mode == "exclude":
+        query = query.filter(~anomaly_condition())
+    elif anomaly_mode == "only":
+        query = query.filter(anomaly_condition())
 
     statuses = _split(args.get("status"))
     if statuses:
@@ -178,7 +190,12 @@ def annotate_batch(ids, status, note=None, annotator=None, level=None):
 
 
 def summary(args):
-    """Dashboard counters for the annotation work bench."""
+    """Dashboard counters for the annotation work bench.
+
+    排名、等级分布等统计默认排除历史异常值 (anomaly=exclude),
+    异常超标记录数量单独给出, 修正后随数据同步重算。
+    """
+    args = {**args, "anomaly": args.get("anomaly", "exclude")}
     base = exceedance_query(args)
     subquery = base.with_entities(Exceedance.id, Exceedance.station_id,
                                   Exceedance.status, Exceedance.level,
@@ -240,9 +257,14 @@ def summary(args):
         func.avg(subquery.c.exceed_ratio),
     ).one()
 
+    anomaly_count = (
+        exceedance_query({**args, "anomaly": "only"}).with_entities(Exceedance.id).count()
+    )
+
     return {
         "total": int(totals[0] or 0),
         "pending": by_status["pending"]["count"],
+        "anomaly_count": int(anomaly_count or 0),
         "by_status": list(by_status.values()),
         "by_level": list(by_level.values()),
         "top_pollutants": top_pollutants,

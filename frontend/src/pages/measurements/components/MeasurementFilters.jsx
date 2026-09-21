@@ -13,6 +13,12 @@ const EXCEEDED_OPTIONS = [
   { value: 'false', label: '仅达标' }
 ]
 
+const ANOMALY_OPTIONS = [
+  { value: 'exclude', label: '排除异常值' },
+  { value: 'only', label: '仅看异常值' },
+  { value: 'include', label: '包含异常值' }
+]
+
 export default function MeasurementFilters({ value, loading, onSubmit, onReset }) {
   const [draft, setDraft] = useState(value)
   const { data: stationData } = useStationOptions()
@@ -29,7 +35,7 @@ export default function MeasurementFilters({ value, loading, onSubmit, onReset }
       loading={loading}
       onSearch={() => onSubmit(draft)}
       onReset={() => {
-        setDraft({ station_id: '', pollutant: '', period: '', is_exceeded: '', date_from: '', date_to: '' })
+        setDraft({ station_id: '', pollutant: '', period: '', is_exceeded: '', anomaly: 'exclude', date_from: '', date_to: '' })
         onReset()
       }}
     >
@@ -57,6 +63,9 @@ export default function MeasurementFilters({ value, loading, onSubmit, onReset }
       </Field>
       <Field label="超标情况">
         <Select value={draft.is_exceeded || ''} onChange={update('is_exceeded')} placeholder="全部" options={EXCEEDED_OPTIONS} />
+      </Field>
+      <Field label="异常值" hint="负数/超量程的历史脏数据">
+        <Select value={draft.anomaly || 'exclude'} onChange={update('anomaly')} options={ANOMALY_OPTIONS} />
       </Field>
       <Field label="开始日期">
         <Input type="date" value={draft.date_from || ''} onChange={update('date_from')} />

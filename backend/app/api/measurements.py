@@ -2,6 +2,7 @@
 from flask import Blueprint, current_app, request
 
 from ..domain.constants import DATA_SOURCE_LABELS, PERIOD_LABELS
+from ..errors import ValidationError
 from ..services import measurement_service, query_service, station_service
 from ..utils.pagination import paginate_query
 from ..utils.validation import Validator
@@ -32,7 +33,38 @@ def preview():
                               required=True, default="hourly")
     validator.raise_if_invalid()
     entries = list_payload("entries", data)
-    return measurement_service.preview_entries(period or "hourly", entries)
+    return measurement_service.preview_entries(period, entries)
+
+
+@bp.post("/imports")
+def import_rows():
+    """批量粘贴/导入: 多行一次原子提交, 与手工录入走同一套数值合理域判定。
+
+    任一行非法 (负数、超量程、非数字) 或未勾选覆盖时存在重复, 整批拒绝,
+    不写入任何记录, 也不影响任何统计。
+    """
+    data = json_payload()
+    validator = Validator(data)
+    default_period = validator.choice("period", "默认数据周期",
+                                      choices=tuple(PERIOD_LABELS.keys()),
+                                      required=False, default="hourly")
+    data_source = validator.choice("data_source", "数据来源",
+                                   choices=tuple(DATA_SOURCE_LABELS.keys()),
+                                   required=False, default="import")
+    recorder = validator.text("recorder", "录入人", required=False, max_length=64)
+    overwrite = validator.boolean("overwrite", False)
+    validator.raise_if_invalid("导入信息不合法")
+
+    rows = list_payload("rows", data)
+    if not rows:
+        raise ValidationError("rows 不能为空", fields={"rows": "empty"})
+    return measurement_service.import_rows(
+        rows,
+        default_period=default_period or "hourly",
+        data_source=data_source or "import",
+        recorder=recorder,
+        overwrite=bool(overwrite),
+    ), 201
 
 
 @bp.post("/entries")
@@ -68,6 +100,7 @@ def create_entries():
 @bp.get("/export")
 def export_measurements():
     from ..utils.csv_export import csv_response
+    from ..domain.value_validation import is_anomalous_value
 
     query, _ = query_service.measurement_query(request.args)
     rows = query.limit(current_app.config["MAX_EXPORT_ROWS"]).all()
@@ -81,6 +114,7 @@ def export_measurements():
         ("单位", "unit"),
         ("限值", "limit_value"),
         ("是否超标", lambda row: "是" if row.is_exceeded else "否"),
+        ("异常值", lambda row: "是" if is_anomalous_value(row.pollutant, row.value) else "否"),
         ("超标倍数", "exceed_ratio"),
         ("监测时间", lambda row: row.measured_at.strftime("%Y-%m-%d %H:%M")),
         ("数据来源", lambda row: DATA_SOURCE_LABELS.get(row.data_source, row.data_source)),

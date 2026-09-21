@@ -1,5 +1,11 @@
 export default function StatCard({ label, value, unit, foot, tone }) {
-  const color = tone === 'danger' ? 'var(--danger)' : tone === 'warning' ? 'var(--warning)' : 'var(--text)'
+  const toneColor = {
+    danger: 'var(--danger)',
+    warning: 'var(--warning)',
+    success: 'var(--success)',
+    info: 'var(--info, var(--primary))'
+  }[tone]
+  const color = toneColor || 'var(--text)'
   return (
     <div className="stat-card">
       <div className="stat-label">{label}</div>

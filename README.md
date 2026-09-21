@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | 运行概览 | `/overview` | 监测点规模、数据总量、超标与待标注统计、近 7 日数据量趋势、待办超标列表 |
 | 监测点台账 | `/stations` | 台账增删改查、区域/类型/状态筛选、点位详情与分因子统计、级联清理关联数据 |
-| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、超标校验预览、重复数据覆盖、录入结果回执 |
+| 监测数据录入 | `/measurements` | 按“监测点 + 时刻 + 周期”成组录入多因子浓度、超标校验预览、重复数据覆盖、**批量粘贴/CSV 导入**、录入结果回执 |
 | 超标记录标注 | `/exceedances` | 超标自动建单、单条/批量标注(确认 / 忽略 / 重置)、等级人工修正、标注留痕与统计 |
-| 数据查询 | `/query` | 多条件组合检索、聚合统计(按因子/站点/区域/日/月等)、分页浏览、CSV 导出 |
+| 数据查询 | `/query` | 多条件组合检索、聚合统计(按因子/站点/区域/日/月等)、分页浏览、CSV 导出、**历史异常值筛选** |
 
 设计要点:
 
@@ -28,7 +28,7 @@
 | 数据库 | SQLite(默认, 零依赖) / PostgreSQL 16(可选, compose 覆盖文件) |
 | 前端 | React 18 · React Router 6 · Vite 7 · Axios · 原生 CSS(设计令牌 + 组件类) |
 | 部署 | Docker 多阶段构建 · Nginx 静态托管与 `/api` 反向代理 · docker compose |
-| 测试 | Pytest(43 个后端用例: 接口 + 领域规则) |
+| 测试 | Pytest(58 个后端用例: 接口 + 领域规则 + 数值合理域与异常值统计) |
 
 ## 目录结构
 
@@ -141,6 +141,37 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 - **无 1 小时限值的因子**(PM2.5、PM10 小时值)仅记录数值, 不参与超标判定, 避免误报。
 - **标注状态**: `待标注(pending)` 由系统自动创建, 人工标注为 `已确认(confirmed)` 或 `已忽略(ignored)`; 确认与忽略都必须填写标注说明, 用于后续追溯。
 
+## 监测值合理域与历史异常数据
+
+“超标”与“异常值”是两件事: 超标是真实但超过 GB 限值, **参与**达标率统计; 异常值是物理上不成立的录入错误, **不参与**任何统计。
+
+- **服务端统一拦截**: 规则集中在 `backend/app/domain/value_validation.py`, 手工录入、超标预览、批量粘贴与 CSV 导入共用同一判定, 绕过页面直接提交同样会被拒绝:
+  - 必须是有限数字 (拒绝非数字、`NaN`、`Infinity`);
+  - 浓度不能为负数;
+  - 不能超过因子的物理合理量程上限 `value_max` (PM2.5 1000 μg/m³, PM10/SO₂/NO₂/O₃ 10000 μg/m³, CO 100 mg/m³; 远大于国标限值, 不会误伤真实超标)。
+- **整批原子性**: 一次提交/导入中任一行非法, 整批返回 422 并回滚, 不写入任何记录, 也不产生超标单或影响统计; 未勾选“覆盖”时存在重复同样整批拒绝 (409)。
+- **历史脏数据识别**: 不依赖写入时标记, 每次查询/统计都按当前口径即时识别 (`value < 0` 或超出 `value_max`)。默认排除并单独给出 `anomaly_count`; 加 `anomaly=only` 可专门筛出, `anomaly=include` 不做区分。达标率/超标率、平均值等聚合、站点/因子/区域排名、超标工作台统计与概览均同此口径, CSV 导出带“异常值”列。
+- **修正后统一重算**: 将异常记录删除或以正确数值“覆盖重提”后, 关联超标单会同步更新或撤销, 达标率与所有分组排名按同一口径自动重算, 无需逐处手工修正。
+- `flask --app wsgi scan-anomalies` 可扫描并列出库中现存的历史异常数据。
+
+### 批量粘贴 / CSV 导入
+
+`POST /api/measurements/imports` 接受多行 `rows` (原子提交, 单次上限 500 行), 同一“站点 + 时刻 + 周期”的多个因子自动合并为一组:
+
+```json
+{
+  "period": "hourly",
+  "recorder": "李四",
+  "overwrite": false,
+  "rows": [
+    { "station_code": "SZ-AQ-001", "measured_at": "2026-09-20 08:00", "pollutant": "PM25", "value": 42.5 },
+    { "station_id": 1, "measured_at": "2026-09-20 08:00", "pollutant": "SO2", "value": 600 }
+  ]
+}
+```
+
+前端录入页“批量粘贴 / 导入”弹窗支持直接粘贴 Excel 内容 (制表符分隔) 或选择 CSV 文件; 带表头按列名 (`站点编码/监测时间/监测因子/监测值` 等) 映射, 无表头按上述列顺序, 因子支持 `PM2.5/SO₂/二氧化硫` 等别名; 提交前后端会再次整批校验。
+
 ## API 概览
 
 统一前缀 `/api`, 成功直接返回数据对象; 失败返回 `{"error": {"code": "...", "message": "...", "fields": {...}}}`。
@@ -157,7 +188,8 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 | GET | `/api/stations/summary` | 台账规模统计 |
 | GET | `/api/measurements` | 监测数据分页查询(含筛选汇总) |
 | POST | `/api/measurements/entries` | **成组录入**: 一个监测点 + 一个时刻 + 多个因子 |
-| POST | `/api/measurements/preview` | 超标校验预览(不写库) |
+| POST | `/api/measurements/imports` | **批量粘贴/导入**: 多行原子提交, 与录入同一校验口径 |
+| POST | `/api/measurements/preview` | 超标校验预览(不写库, 同样拦截异常值) |
 | DELETE | `/api/measurements/{id}` | 删除监测数据 |
 | GET | `/api/measurements/export` | 按条件导出 CSV |
 | GET | `/api/exceedances` | 超标记录查询(含筛选统计) |
@@ -228,7 +260,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --buil
 
 ```bash
 cd backend
-python -m pytest -q          # 43 个用例: 台账 CRUD/级联、录入与超标判定、标注规则、查询统计与导出、元数据接口
+python -m pytest -q          # 58 个用例: 台账 CRUD/级联、录入与超标判定、数值合理域拦截、批量导入原子性、历史异常值识别与统计口径、标注规则、查询统计与导出、元数据接口
 
 cd frontend
 npm run build                # 生产构建校验
@@ -239,6 +271,7 @@ npm run build                # 生产构建校验
 ```bash
 curl http://localhost:5000/api/meta/health
 python -m flask --app wsgi stats      # 查看监测点/数据/超标记录数量
+python -m flask --app wsgi scan-anomalies   # 扫描历史异常监测值 (负数/超量程)
 python -m flask --app wsgi reset-db   # 重置数据库并重建演示数据
 ```
 

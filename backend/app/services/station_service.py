@@ -2,9 +2,12 @@
 from sqlalchemy import cast, func, or_
 
 from ..domain.constants import STATION_STATUS_LABELS, STATION_TYPE_LABELS
+from ..domain.value_validation import sql_anomaly_condition
 from ..errors import ConflictError, NotFoundError
 from ..extensions import db
 from ..models import Exceedance, Measurement, Station
+
+_MEASUREMENT_ANOMALY = sql_anomaly_condition(Measurement)
 
 
 def _split(value):
@@ -80,30 +83,48 @@ def delete_station(station):
 
 
 def stats_map(station_ids):
-    """Aggregated counters for a page of stations."""
+    """Aggregated counters for a page of stations.
+
+    监测数据量/超标数/待标注数默认只统计有效数据, 异常值单独给出 anomaly_count。
+    """
     if not station_ids:
         return {}
     measurements = dict(
         db.session.query(Measurement.station_id, func.count(Measurement.id))
-        .filter(Measurement.station_id.in_(station_ids))
+        .filter(Measurement.station_id.in_(station_ids), ~_MEASUREMENT_ANOMALY)
+        .group_by(Measurement.station_id)
+        .all()
+    )
+    anomalies = dict(
+        db.session.query(Measurement.station_id, func.count(Measurement.id))
+        .filter(Measurement.station_id.in_(station_ids), _MEASUREMENT_ANOMALY)
         .group_by(Measurement.station_id)
         .all()
     )
     exceeded = dict(
         db.session.query(Measurement.station_id, func.count(Measurement.id))
-        .filter(Measurement.station_id.in_(station_ids), Measurement.is_exceeded.is_(True))
+        .filter(
+            Measurement.station_id.in_(station_ids),
+            Measurement.is_exceeded.is_(True),
+            ~_MEASUREMENT_ANOMALY,
+        )
         .group_by(Measurement.station_id)
         .all()
     )
     pending = dict(
         db.session.query(Exceedance.station_id, func.count(Exceedance.id))
-        .filter(Exceedance.station_id.in_(station_ids), Exceedance.status == "pending")
+        .join(Measurement, Measurement.id == Exceedance.measurement_id)
+        .filter(
+            Exceedance.station_id.in_(station_ids),
+            Exceedance.status == "pending",
+            ~_MEASUREMENT_ANOMALY,
+        )
         .group_by(Exceedance.station_id)
         .all()
     )
     last_seen = dict(
         db.session.query(Measurement.station_id, func.max(Measurement.measured_at))
-        .filter(Measurement.station_id.in_(station_ids))
+        .filter(Measurement.station_id.in_(station_ids), ~_MEASUREMENT_ANOMALY)
         .group_by(Measurement.station_id)
         .all()
     )
@@ -114,6 +135,7 @@ def stats_map(station_ids):
             "measurement_count": int(measurements.get(station_id, 0)),
             "exceeded_count": int(exceeded.get(station_id, 0)),
             "pending_count": int(pending.get(station_id, 0)),
+            "anomaly_count": int(anomalies.get(station_id, 0)),
             "last_measured_at": iso(last_seen.get(station_id)),
         }
         for station_id in station_ids
@@ -130,22 +152,34 @@ def detail_stats(station):
             func.avg(Measurement.value),
             func.max(Measurement.value),
         )
-        .filter(Measurement.station_id == station.id)
+        .filter(Measurement.station_id == station.id, ~_MEASUREMENT_ANOMALY)
         .group_by(Measurement.pollutant)
         .all()
     )
-    pollutants = [
-        {
-            "pollutant": pollutant,
-            "count": int(count or 0),
-            "exceeded_count": int(exceeded or 0),
-            "avg_value": round(float(avg), 2) if avg is not None else None,
-            "max_value": float(max_value) if max_value is not None else None,
-        }
-        for pollutant, count, exceeded, avg, max_value in rows
-    ]
+    anomaly_rows = dict(
+        db.session.query(Measurement.pollutant, func.count(Measurement.id))
+        .filter(Measurement.station_id == station.id, _MEASUREMENT_ANOMALY)
+        .group_by(Measurement.pollutant)
+        .all()
+    )
+    valid_map = {row[0]: row for row in rows}
+    pollutants = []
+    for pollutant in sorted(set(valid_map) | set(anomaly_rows)):
+        _, count, exceeded, avg, max_value = valid_map.get(
+            pollutant, (pollutant, 0, 0, None, None)
+        )
+        pollutants.append(
+            {
+                "pollutant": pollutant,
+                "count": int(count or 0),
+                "exceeded_count": int(exceeded or 0),
+                "anomaly_count": int(anomaly_rows.get(pollutant, 0)),
+                "avg_value": round(float(avg), 2) if avg is not None else None,
+                "max_value": float(max_value) if max_value is not None else None,
+            }
+        )
     summary = stats_map([station.id]).get(station.id, {})
-    summary["pollutants"] = sorted(pollutants, key=lambda item: item["pollutant"])
+    summary["pollutants"] = pollutants
     return summary
 
 

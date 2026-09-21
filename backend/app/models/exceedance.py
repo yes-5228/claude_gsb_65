@@ -5,6 +5,7 @@ from ..domain.constants import (
     PERIOD_LABELS,
     label_of,
 )
+from ..domain.value_validation import is_anomalous_value
 from ..extensions import db
 from .base import TimestampMixin, iso
 
@@ -47,6 +48,7 @@ class Exceedance(TimestampMixin, db.Model):
             "period": self.period,
             "period_label": label_of(PERIOD_LABELS, self.period),
             "value": self.value,
+            "is_anomaly": is_anomalous_value(self.pollutant, self.value),
             "limit_value": self.limit_value,
             "exceed_ratio": self.exceed_ratio,
             "level": self.level,
